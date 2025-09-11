@@ -228,12 +228,31 @@ const initialState = {
   isEditing: false, // Flag to indicate if we're editing existing data
   hasUnsavedChanges: false, // Flag to indicate if there are unsaved changes
   originalData: null, // Store original data for comparison
+  message: {
+    text: '',
+    type: '', // 'success' or 'error'
+    visible: false
+  },
 };
 
 const formSlice = createSlice({
   name: "form",
   initialState,
   reducers: {
+    showMessage(state, action) {
+      state.message = {
+        text: action.payload.text,
+        type: action.payload.type,
+        visible: true
+      };
+    },
+    clearMessage(state) {
+      state.message = {
+        text: '',
+        type: '',
+        visible: false
+      };
+    },
     setUser(state, action) {
       state.user = action.payload;
       state.hasUnsavedChanges = true;
@@ -271,18 +290,27 @@ const formSlice = createSlice({
     clearUsersError(state) {
       state.usersError = null;
     },
+    saveOriginalData(state) {
+      state.originalData = {
+        user: { ...state.user },
+        relatedOfficials: state.relatedOfficials.map(official => ({ ...official }))
+      };
+      state.hasUnsavedChanges = false;
+    },
     setSearchQuery(state, action) {
       state.searchQuery = action.payload;
       if (!action.payload) {
         state.filteredUsers = state.apiUsers;
       } else {
-        const query = action.payload.toLowerCase();
-        state.filteredUsers = state.apiUsers.filter(user => 
-          user.first_name.toLowerCase().includes(query) ||
-          user.last_name.toLowerCase().includes(query)
-        );
-      }
-    },
+        const query = action.payload.toLowerCase().trim();
+        const searchTerms = query.split(' ').filter(term => term.length > 0);
+    
+    state.filteredUsers = state.apiUsers.filter(user => {
+      const fullName = `${user.first_name.toLowerCase()} ${user.last_name.toLowerCase()}`;
+      return searchTerms.every(term => fullName.includes(term));
+    });
+  }
+},
     saveOriginalData(state) {
       state.originalData = {
         user: { ...state.user },
@@ -375,6 +403,12 @@ const formSlice = createSlice({
           firstName: action.payload.first_name,
           lastName: action.payload.last_name,
         };
+        // Show success message
+        state.message = {
+          text: 'Successfully created new record',
+          type: 'success',
+          visible: true
+        };
       })
       .addCase(createPersonalDetails.rejected, (state, action) => {
         state.loading = false;
@@ -411,6 +445,16 @@ const formSlice = createSlice({
       .addCase(updatePersonalDetails.fulfilled, (state, action) => {
         state.loading = false;
         state.error = null;
+        state.hasUnsavedChanges = false;
+        state.originalData = {
+          user: { ...state.user },
+          relatedOfficials: state.relatedOfficials.map(official => ({ ...official }))
+        };
+        state.message = {
+          text: 'Successfully updated record',
+          type: 'success',
+          visible: true
+        };
         state.user = {
           firstName: action.payload.first_name,
           lastName: action.payload.last_name,
@@ -493,6 +537,8 @@ export const {
   saveOriginalData,
   revertChanges,
   setSearchQuery,
+  showMessage,
+  clearMessage,
 } = formSlice.actions;
 
 export default formSlice.reducer;

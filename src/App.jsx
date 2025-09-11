@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-
 import { useSelector, useDispatch } from "react-redux";
 import {
   resetForm,
@@ -14,9 +13,11 @@ import {
   setPersonalDetailsId,
   setSearchQuery,
   softDeletePersonalDetails,
+  showMessage
 } from "./slice/formSlice";
 import PersonalDetails from "./components/firstButton/tabContent/PersonalDetails";
 import RelatedOfficials from "./components/firstButton/tabContent/RelatedOfficials";
+import Message from "./components/Message";
 
 const tabs = [
   {
@@ -83,10 +84,13 @@ export default function UserManagementApp() {
 
     try {
       await dispatch(softDeletePersonalDetails(personalDetailsId)).unwrap();
-      alert("Successfully deleted the user and related officials");
+      dispatch(showMessage({ text: "Successfully deleted the record", type: "success" }));
     } catch (error) {
       console.error("Failed to delete:", error);
-      alert(`Failed to delete: ${error.message}`);
+      dispatch(showMessage({ 
+        text: `Failed to delete: ${error.message}`, 
+        type: "error" 
+      }));
     }
   };
 
@@ -155,12 +159,13 @@ export default function UserManagementApp() {
       // Refresh the data and save it as the new original state
       await dispatch(fetchAllUsers());
       await fetchDataFromAPI(personalDetailsId);
-      dispatch(saveOriginalData());
-
-      alert("All data updated successfully!");
+      dispatch(showMessage({ text: "All data updated successfully!", type: "success" }));
     } catch (error) {
       console.error("Failed to update data:", error);
-      alert(`Failed to update data: ${error.message}`);
+      dispatch(showMessage({ 
+        text: `Failed to update data: ${error.message}`, 
+        type: "error" 
+      }));
     } finally {
       setSaving(false);
     }
@@ -254,11 +259,13 @@ export default function UserManagementApp() {
       // Reset form and refresh API users list
       dispatch(resetForm());
       dispatch(fetchAllUsers());
-
-      alert("Data saved successfully to API!");
+      dispatch(showMessage({ text: "Data saved successfully!", type: "success" }));
     } catch (error) {
       console.error("Failed to save data to API:", error);
-      alert(`Failed to save data: ${error.message || error}`);
+      dispatch(showMessage({ 
+        text: `Failed to save data: ${error.message || error}`, 
+        type: "error" 
+      }));
     } finally {
       setSaving(false);
     }
@@ -266,6 +273,7 @@ export default function UserManagementApp() {
 
   return (
     <div className="flex flex-col h-screen bg-gray-100">
+      <Message />
       {/* Main content area with padding for the fixed bottom bar */}
       <div className="flex-1 overflow-hidden">
         {/* Scrollable content container */}
@@ -326,7 +334,11 @@ export default function UserManagementApp() {
                 <input
                   type="text"
                   value={searchText}
-                  onChange={(e) => setSearchText(e.target.value)}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setSearchText(value);
+                    dispatch(setSearchQuery(value));
+                  }}
                   placeholder="Search by name..."
                   className="flex-1 px-4 py-2 border border-gray-300 rounded-md text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all"
                 />

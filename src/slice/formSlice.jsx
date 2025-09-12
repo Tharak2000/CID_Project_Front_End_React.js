@@ -254,7 +254,11 @@ const formSlice = createSlice({
       };
     },
     setUser(state, action) {
-      state.user = action.payload;
+      state.user = {
+        firstName: "",
+        lastName: "",
+        ...action.payload
+      };
       state.hasUnsavedChanges = true;
     },
     setRelatedOfficials(state, action) {
@@ -275,7 +279,10 @@ const formSlice = createSlice({
       state.hasUnsavedChanges = true;
     },
     resetForm(state) {
-      state.user = initialState.user;
+      state.user = {
+        firstName: "",
+        lastName: "",
+      };
       state.relatedOfficials = [];
       state.error = null;
       state.personalDetailsId = null;

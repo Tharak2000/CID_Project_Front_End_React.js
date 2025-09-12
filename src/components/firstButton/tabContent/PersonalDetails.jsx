@@ -5,7 +5,7 @@ import { setUser } from "../../../slice/formSlice";
 
 export default function PersonalDetails() {
   const dispatch = useDispatch();
-  const user = useSelector((state) => state.form.user);
+  const user = useSelector((state) => state.form.user) || { firstName: "", lastName: "" };
   const loading = useSelector((state) => state.form.loading);
   const error = useSelector((state) => state.form.error);
   const personalDetailsId = useSelector(
@@ -14,7 +14,11 @@ export default function PersonalDetails() {
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    dispatch(setUser({ ...user, [name]: value }));
+    const updatedUser = {
+      ...user,
+      [name]: value || ""  // Ensure value is never undefined
+    };
+    dispatch(setUser(updatedUser));
   };
 
   return (
@@ -48,7 +52,7 @@ export default function PersonalDetails() {
         type="text"
         name="firstName"
         placeholder="First Name"
-        value={user.firstName}
+        value={user.firstName || ""}
         onChange={handleChange}
         className="w-full border rounded-md p-2 mb-2"
       />
@@ -56,7 +60,7 @@ export default function PersonalDetails() {
         type="text"
         name="lastName"
         placeholder="Last Name"
-        value={user.lastName}
+        value={user.lastName || ""}
         onChange={handleChange}
         className="w-full border rounded-md p-2 mb-4"
       />

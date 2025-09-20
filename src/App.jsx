@@ -405,22 +405,6 @@ export default function UserManagementApp() {
       } else {
         console.log("No bank details to create");
       }
-      if (bankDetails.accountDetails && bankDetails.accountDetails.trim()) {
-        try {
-          await dispatch(createBankDetails({
-            personalDetailsId: personalDetailsId,
-            accountDetails: bankDetails.accountDetails,
-            loans: bankDetails.loans || "0",
-            leasingFacilities: bankDetails.leasingFacilities || "0",
-          })).unwrap();
-          console.log("Created bank details for person");
-        } catch (bankError) {
-          console.error("Failed to create bank details:", bankError);
-          alert(
-            `Warning: Failed to create bank details: ${bankError.message || bankError}`
-          );
-        }
-      }
 
       console.log("All data saved to API successfully");
 

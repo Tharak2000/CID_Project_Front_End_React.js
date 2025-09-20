@@ -7,6 +7,7 @@ import {
   deleteBankDetailsFromState,
   createBankDetails,
   updateBankDetails,
+  softDeleteBankDetails,
 } from "../../../slice/BankDetailsSlice";
 import { useDispatch, useSelector } from "react-redux";
 
@@ -86,7 +87,12 @@ export default function BankDetails() {
 
   const handleDelete = (index) => {
     if (window.confirm("Are you sure you want to remove this bank detail?")) {
-      dispatch(deleteBankDetailsFromState(index));
+      const bankDetail = bankDetailsList[index];
+      if (bankDetail.id) {
+        dispatch(softDeleteBankDetails(bankDetail.id));
+      } else {
+        dispatch(deleteBankDetailsFromState(index));
+      }
       // Reset form if editing the deleted item
       if (editIndex === index) {
         setFormData({ accountDetails: "", loans: "", leasingFacilities: "" });

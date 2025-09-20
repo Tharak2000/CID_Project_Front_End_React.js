@@ -15,8 +15,17 @@ import {
   softDeletePersonalDetails,
   showMessage
 } from "./slice/formSlice";
+import {
+  resetBankDetails,
+  fetchBankDetailsById,
+  createBankDetails,
+  updateBankDetails,
+  populateBankDetailsFromExternal,
+  setPersonalDetailsId as setBankDetailsPersonalId,
+} from "./slice/BankDetailsSlice";
 import PersonalDetails from "./components/firstButton/tabContent/PersonalDetails";
 import RelatedOfficials from "./components/firstButton/tabContent/RelatedOfficials";
+import BankDetails from "./components/firstButton/tabContent/BankDetails";
 import Message from "./components/Message";
 
 const tabs = [
@@ -28,6 +37,10 @@ const tabs = [
     name: "Related Officials",
     component: (props) => <RelatedOfficials {...props} />,
   },
+  {
+    name: "Bank Details",
+    component: (props) => <BankDetails {...props} />
+  }
 ];
 
 export default function UserManagementApp() {
@@ -38,24 +51,58 @@ export default function UserManagementApp() {
   const [searchText, setSearchText] = useState("");
 
   const dispatch = useDispatch();
-  // ✅ Get Redux data from the global state
+  
+  // ✅ Get Redux data from the global state (Form slice)
   const personalDetails = useSelector((state) => state.form.user);
   const relatedOfficials = useSelector((state) => state.form.relatedOfficials);
   const personalDetailsId = useSelector((state) => state.form.personalDetailsId);
   const isEditing = useSelector((state) => state.form.isEditing);
   const hasUnsavedChanges = useSelector((state) => state.form.hasUnsavedChanges);
+  
+  // Bank Details Redux state
+  const bankDetailsList = useSelector((state) => state.bankDetails.bankDetailsList);
+  const bankDetailsIsEditing = useSelector((state) => state.bankDetails.isEditing);
+  const bankDetailsHasUnsavedChanges = useSelector((state) => state.bankDetails.hasUnsavedChanges);
 
   // API users state
   const apiUsers = useSelector((state) => state.form.apiUsers);
   const filteredUsers = useSelector((state) => state.form.filteredUsers);
   const loadingUsers = useSelector((state) => state.form.loadingUsers);
   const usersError = useSelector((state) => state.form.usersError);
+  
   const fetchDataFromAPI = async (id) => {
     try {
-      await dispatch(fetchPersonalDetails(id)).unwrap();
+      // Fetch personal details, related officials, and bank details (combined endpoint)
+      const combinedData = await dispatch(fetchPersonalDetails(id)).unwrap();
       dispatch(setPersonalDetailsId(id));
+      
+      // Populate bank details from the combined data
+      dispatch(populateBankDetailsFromExternal({
+        bankDetailsData: combinedData.bank_details || [],
+        personalDetailsId: id
+      }));
+      
     } catch (error) {
       console.error("Failed to fetch personal details:", error);
+      
+      // If the error indicates the record was deleted or not found, show appropriate message
+      if (error.message.includes('404') || error.message.includes('not found') || error.message.includes('JSON')) {
+        dispatch(showMessage({ 
+          text: "This record may have been deleted. Refreshing the list...", 
+          type: "error" 
+        }));
+        // Refresh the users list to ensure deleted records are removed
+        dispatch(fetchAllUsers());
+      } else {
+        dispatch(showMessage({ 
+          text: `Failed to load record: ${error.message}`, 
+          type: "error" 
+        }));
+      }
+      
+      // Reset forms on error
+      dispatch(resetForm());
+      dispatch(resetBankDetails());
     }
   };
 
@@ -78,12 +125,27 @@ export default function UserManagementApp() {
       return;
     }
 
-    if (!window.confirm("Are you sure you want to delete this user and all related officials? This action cannot be undone.")) {
+    if (!window.confirm("Are you sure you want to delete this user and all related data? This action cannot be undone.")) {
       return;
     }
 
+    setSaving(true);
     try {
       await dispatch(softDeletePersonalDetails(personalDetailsId)).unwrap();
+      
+      // Clear all forms and reset state
+      dispatch(resetForm());
+      dispatch(resetBankDetails());
+      
+      // Refresh the users list to remove deleted user from UI
+      await dispatch(fetchAllUsers()).unwrap();
+      
+      // Reset search if active
+      if (searchText) {
+        setSearchText("");
+        dispatch(setSearchQuery(""));
+      }
+      
       dispatch(showMessage({ text: "Successfully deleted the record", type: "success" }));
     } catch (error) {
       console.error("Failed to delete:", error);
@@ -91,68 +153,117 @@ export default function UserManagementApp() {
         text: `Failed to delete: ${error.message}`, 
         type: "error" 
       }));
+    } finally {
+      setSaving(false);
     }
   };
 
   const updateAllData = async () => {
-    if (!hasUnsavedChanges) {
+    if (!hasUnsavedChanges && !bankDetailsHasUnsavedChanges) {
       alert("No changes to update");
       return;
     }
 
     setSaving(true);
     try {
-      // Update personal details
-      await dispatch(
-        updatePersonalDetails({
-          id: personalDetailsId,
-          personalDetailsData: {
-            firstName: personalDetails.firstName,
-            lastName: personalDetails.lastName,
-          },
-        })
-      ).unwrap();
+      // Update personal details if changed
+      if (hasUnsavedChanges) {
+        await dispatch(
+          updatePersonalDetails({
+            id: personalDetailsId,
+            personalDetailsData: {
+              firstName: personalDetails.firstName,
+              lastName: personalDetails.lastName,
+            },
+          })
+        ).unwrap();
 
-      // Update related officials
-      if (relatedOfficials && relatedOfficials.length > 0) {
-        for (const official of relatedOfficials) {
-          if (official.isTemporary && official.id) {
-            // Update existing official that has temporary changes
-            try {
-              await dispatch(
-                updateRelatedOfficial({
-                  id: official.id,
-                  relatedOfficialData: {
+        // Update related officials
+        if (relatedOfficials && relatedOfficials.length > 0) {
+          for (const official of relatedOfficials) {
+            if (official.isTemporary && official.id) {
+              // Update existing official that has temporary changes
+              try {
+                await dispatch(
+                  updateRelatedOfficial({
+                    id: official.id,
+                    relatedOfficialData: {
+                      relatedOfficialName: official.relatedOfficialName,
+                      relatedOfficialIdNumber: official.relatedOfficialIdNumber || "",
+                    },
+                  })
+                ).unwrap();
+              } catch (officialError) {
+                console.error(
+                  "Failed to update related official:",
+                  official.relatedOfficialName,
+                  officialError
+                );
+              }
+            } else if (official.isTemporary) {
+              // Create new official
+              try {
+                await dispatch(
+                  createRelatedOfficial({
+                    personalDetailsId,
                     relatedOfficialName: official.relatedOfficialName,
                     relatedOfficialIdNumber: official.relatedOfficialIdNumber || "",
-                  },
-                })
-              ).unwrap();
-            } catch (officialError) {
-              console.error(
-                "Failed to update related official:",
-                official.relatedOfficialName,
-                officialError
-              );
-            }
-          } else if (official.isTemporary) {
-            // Create new official
-            try {
-              await dispatch(
-                createRelatedOfficial({
-                  personalDetailsId,
-                  relatedOfficialName: official.relatedOfficialName,
-                  relatedOfficialIdNumber: official.relatedOfficialIdNumber || "",
-                })
-              ).unwrap();
-            } catch (officialError) {
-              console.error(
-                "Failed to create related official:",
-                official.relatedOfficialName,
-                officialError
-              );
+                  })
+                ).unwrap();
+              } catch (officialError) {
+                console.error(
+                  "Failed to create related official:",
+                  official.relatedOfficialName,
+                  officialError
+                );
+              }
             }
           }
+        }
+      }
+
+      // Update bank details if changed
+      if (bankDetailsHasUnsavedChanges && personalDetailsId && bankDetailsList.length > 0) {
+        try {
+          for (const bankDetail of bankDetailsList) {
+            if (bankDetail.isTemporary && bankDetail.id) {
+              // Update existing bank details that has temporary changes
+              try {
+                await dispatch(updateBankDetails({
+                  id: bankDetail.id,
+                  bankDetailsData: {
+                    accountDetails: bankDetail.accountDetails,
+                    loans: bankDetail.loans || "0",
+                    leasingFacilities: bankDetail.leasingFacilities || "0",
+                  }
+                })).unwrap();
+              } catch (bankError) {
+                console.error(
+                  "Failed to update bank details:",
+                  bankDetail.accountDetails,
+                  bankError
+                );
+              }
+            } else if (bankDetail.isTemporary) {
+              // Create new bank details
+              try {
+                await dispatch(createBankDetails({
+                  personalDetailsId: personalDetailsId,
+                  accountDetails: bankDetail.accountDetails,
+                  loans: bankDetail.loans || "0",
+                  leasingFacilities: bankDetail.leasingFacilities || "0",
+                })).unwrap();
+              } catch (bankError) {
+                console.error(
+                  "Failed to create bank details:",
+                  bankDetail.accountDetails,
+                  bankError
+                );
+              }
+            }
+          }
+        } catch (bankError) {
+          console.error("Failed to update bank details:", bankError);
         }
       }
 
@@ -254,10 +365,68 @@ export default function UserManagementApp() {
         console.log("No related officials to create");
       }
 
+      // Create bank details if provided
+      if (bankDetailsList && bankDetailsList.length > 0) {
+        for (const bankDetail of bankDetailsList) {
+          // Skip bank details without required data
+          if (
+            !bankDetail.accountDetails ||
+            !bankDetail.accountDetails.trim()
+          ) {
+            console.warn("Skipping bank details without account details:", bankDetail);
+            continue;
+          }
+
+          try {
+            await dispatch(createBankDetails({
+              personalDetailsId: personalDetailsId,
+              accountDetails: bankDetail.accountDetails,
+              loans: bankDetail.loans || "0",
+              leasingFacilities: bankDetail.leasingFacilities || "0",
+            })).unwrap();
+            console.log(
+              "Created bank details:",
+              bankDetail.accountDetails
+            );
+          } catch (bankError) {
+            console.error(
+              "Failed to create bank details:",
+              bankDetail.accountDetails,
+              bankError
+            );
+            // Continue with other bank details even if one fails
+            alert(
+              `Warning: Failed to create bank details "${
+                bankDetail.accountDetails
+              }": ${bankError.message || bankError}`
+            );
+          }
+        }
+      } else {
+        console.log("No bank details to create");
+      }
+      if (bankDetails.accountDetails && bankDetails.accountDetails.trim()) {
+        try {
+          await dispatch(createBankDetails({
+            personalDetailsId: personalDetailsId,
+            accountDetails: bankDetails.accountDetails,
+            loans: bankDetails.loans || "0",
+            leasingFacilities: bankDetails.leasingFacilities || "0",
+          })).unwrap();
+          console.log("Created bank details for person");
+        } catch (bankError) {
+          console.error("Failed to create bank details:", bankError);
+          alert(
+            `Warning: Failed to create bank details: ${bankError.message || bankError}`
+          );
+        }
+      }
+
       console.log("All data saved to API successfully");
 
-      // Reset form and refresh API users list
+      // Reset forms and refresh API users list
       dispatch(resetForm());
+      dispatch(resetBankDetails());
       dispatch(fetchAllUsers());
       dispatch(showMessage({ text: "Data saved successfully!", type: "success" }));
     } catch (error) {

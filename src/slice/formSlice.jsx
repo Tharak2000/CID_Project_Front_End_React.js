@@ -69,55 +69,55 @@ export const updatePersonalDetails = createAsyncThunk(
 );
 
 // Async thunk for soft deleting personal details
-export const softDeletePersonalDetails = createAsyncThunk(
-  "form/softDeletePersonalDetails",
-  async (id, { rejectWithValue, getState }) => {
-    try {
-      // First soft delete personal details
-      const response = await fetch(`${API_BASE}/personaldetails/soft_delete/${id}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          first_name: getState().form.user.firstName,
-          last_name: getState().form.user.lastName,
-        }),
-      });
+// export const softDeletePersonalDetails = createAsyncThunk(
+//   "form/softDeletePersonalDetails",
+//   async (id, { rejectWithValue, getState }) => {
+//     try {
+//       // First soft delete personal details
+//       const response = await fetch(`${API_BASE}/personaldetails/soft_delete/${id}`, {
+//         method: "PUT",
+//         headers: {
+//           "Content-Type": "application/json",
+//         },
+//         body: JSON.stringify({
+//           first_name: getState().form.user.firstName,
+//           last_name: getState().form.user.lastName,
+//         }),
+//       });
 
-      if (!response.ok) {
-        throw new Error("Failed to soft delete personal details");
-      }
+//       if (!response.ok) {
+//         throw new Error("Failed to soft delete personal details");
+//       }
 
-      // Get all related officials for this person
-      const relatedOfficials = getState().form.relatedOfficials;
+//       // Get all related officials for this person
+//       const relatedOfficials = getState().form.relatedOfficials;
 
-      // Soft delete all related officials
-      for (const official of relatedOfficials) {
-        if (official.id) {
-          try {
-            await fetch(`${API_BASE}/relatedofficials/${official.id}`, {
-              method: "PUT",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                related_official_name: official.relatedOfficialName,
-                related_official_nic_number: official.relatedOfficialIdNumber,
-              }),
-            });
-          } catch (error) {
-            console.error(`Failed to soft delete related official ${official.id}:`, error);
-          }
-        }
-      }
+//       // Soft delete all related officials
+//       for (const official of relatedOfficials) {
+//         if (official.id) {
+//           try {
+//             await fetch(`${API_BASE}/relatedofficials/${official.id}`, {
+//               method: "PUT",
+//               headers: {
+//                 "Content-Type": "application/json",
+//               },
+//               body: JSON.stringify({
+//                 related_official_name: official.relatedOfficialName,
+//                 related_official_nic_number: official.relatedOfficialIdNumber,
+//               }),
+//             });
+//           } catch (error) {
+//             console.error(`Failed to soft delete related official ${official.id}:`, error);
+//           }
+//         }
+//       }
 
-      return id;
-    } catch (error) {
-      return rejectWithValue(error.message);
-    }
-  }
-);
+//       return id;
+//     } catch (error) {
+//       return rejectWithValue(error.message);
+//     }
+//   }
+// );
 
 // Async thunk for updating related official
 export const updateRelatedOfficial = createAsyncThunk(
@@ -205,6 +205,128 @@ export const createRelatedOfficial = createAsyncThunk(
       }
       const data = await response.json();
       return data;
+    } catch (error) {
+      return rejectWithValue(error.message);
+    }
+  }
+);
+
+export const softDeletePersonalDetails = createAsyncThunk(
+  "form/softDeletePersonalDetails",
+  async (id, { rejectWithValue, getState }) => {
+    try {
+      // First get combined data to find all related records
+      let combinedData;
+      try {
+        const combinedResponse = await fetch(`${API_BASE}/personaldetails/${id}/combined`);
+        if (combinedResponse.ok) {
+          combinedData = await combinedResponse.json();
+        }
+      } catch (error) {
+        console.warn("Could not fetch combined data, proceeding with available data:", error);
+      }
+
+      // Soft delete personal details
+      const response = await fetch(`${API_BASE}/personaldetails/soft_delete/${id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          first_name: getState().form.user.firstName,
+          last_name: getState().form.user.lastName,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to soft delete personal details");
+      }
+
+      // Get related officials from state or combined data
+      const relatedOfficials = getState().form.relatedOfficials;
+      const combinedOfficials = combinedData?.related_officials || [];
+
+      // Create a set of all official IDs to delete (from both sources)
+      const officialIdsToDelete = new Set();
+
+      // Add IDs from Redux state
+      relatedOfficials.forEach(official => {
+        if (official.id) {
+          officialIdsToDelete.add(official.id);
+        }
+      });
+
+      // Add IDs from combined data (in case some weren't loaded in state)
+      combinedOfficials.forEach(official => {
+        if (official.related_officials_id && !official.ro_is_deleted) {
+          officialIdsToDelete.add(official.related_officials_id);
+        }
+      });
+
+      // Soft delete all related officials
+      for (const officialId of officialIdsToDelete) {
+        try {
+          // Find the official data for the API call
+          const officialFromState = relatedOfficials.find(o => o.id === officialId);
+          const officialFromCombined = combinedOfficials.find(o => o.related_officials_id === officialId);
+
+          const officialData = officialFromState || officialFromCombined;
+
+          await fetch(`${API_BASE}/relatedofficials/soft_delete/${officialId}`, {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              related_official_name: officialData?.relatedOfficialName || officialData?.related_official_name,
+              related_official_nic_number: officialData?.relatedOfficialIdNumber || officialData?.related_official_nic_number,
+            }),
+          });
+          console.log(`Successfully soft deleted related official ${officialId}`);
+        } catch (error) {
+          console.error(`Failed to soft delete related official ${officialId}:`, error);
+        }
+      }
+
+      // Get bank details and soft delete them
+      const bankDetails = getState().bankDetails;
+      const combinedBankDetails = combinedData?.bank_details || [];
+
+      // Create a set of all bank detail IDs to delete
+      const bankDetailIdsToDelete = new Set();
+
+      // Add ID from Redux state
+      if (bankDetails.bankDetailsId) {
+        bankDetailIdsToDelete.add(bankDetails.bankDetailsId);
+      }
+
+      // Add IDs from combined data (in case bank details weren't loaded in state)
+      combinedBankDetails.forEach(bankDetail => {
+        if (bankDetail.bank_details_id && !bankDetail.bd_is_deleted) {
+          bankDetailIdsToDelete.add(bankDetail.bank_details_id);
+        }
+      });
+
+      // Soft delete all bank details
+      for (const bankDetailId of bankDetailIdsToDelete) {
+        try {
+          await fetch(`${API_BASE}/bankdetails/soft_delete/${bankDetailId}`, {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+            },
+          });
+          console.log(`Successfully soft deleted bank details ${bankDetailId}`);
+        } catch (error) {
+          console.error(`Failed to soft delete bank details ${bankDetailId}:`, error);
+        }
+      }
+
+      return {
+        id,
+        deletedOfficials: Array.from(officialIdsToDelete),
+        deletedBankDetails: Array.from(bankDetailIdsToDelete)
+      };
     } catch (error) {
       return rejectWithValue(error.message);
     }
@@ -311,13 +433,13 @@ const formSlice = createSlice({
       } else {
         const query = action.payload.toLowerCase().trim();
         const searchTerms = query.split(' ').filter(term => term.length > 0);
-    
-    state.filteredUsers = state.apiUsers.filter(user => {
-      const fullName = `${user.first_name.toLowerCase()} ${user.last_name.toLowerCase()}`;
-      return searchTerms.every(term => fullName.includes(term));
-    });
-  }
-},
+
+        state.filteredUsers = state.apiUsers.filter(user => {
+          const fullName = `${user.first_name.toLowerCase()} ${user.last_name.toLowerCase()}`;
+          return searchTerms.every(term => fullName.includes(term));
+        });
+      }
+    },
     saveOriginalData(state) {
       state.originalData = {
         user: { ...state.user },
@@ -508,22 +630,31 @@ const formSlice = createSlice({
       .addCase(softDeletePersonalDetails.fulfilled, (state, action) => {
         state.loading = false;
         state.error = null;
-        // Remove the deleted user from lists
+
+        const { id, deletedOfficials, deletedBankDetails } = action.payload;
+
+        // Remove the deleted user from both user lists
         state.apiUsers = state.apiUsers.filter(
-          user => user.personal_details_id !== action.payload
+          user => user.personal_details_id !== id
         );
         state.filteredUsers = state.filteredUsers.filter(
-          user => user.personal_details_id !== action.payload
+          user => user.personal_details_id !== id
         );
-        // Reset form if the deleted user was being edited
-        if (state.personalDetailsId === action.payload) {
-          state.user = initialState.user;
+
+        // Reset form completely if the deleted user was being edited
+        if (state.personalDetailsId === id) {
+          state.user = {
+            firstName: "",
+            lastName: "",
+          };
           state.relatedOfficials = [];
           state.personalDetailsId = null;
           state.isEditing = false;
           state.hasUnsavedChanges = false;
           state.originalData = null;
         }
+
+        console.log(`Successfully deleted personal details ${id} and ${deletedOfficials?.length || 0} related officials and ${deletedBankDetails?.length || 0} bank details`);
       })
       .addCase(softDeletePersonalDetails.rejected, (state, action) => {
         state.loading = false;
